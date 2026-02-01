@@ -1,4 +1,4 @@
--- Rivals Only!! | AUTO LEAVE WHEN STAFF DETECTED
+-- Rivals Only!! | AUTO LEAVE WHEN STAFF OR STAFF-FRIEND DETECTED
 
 xpcall(function()
     if game.GameId ~= 6035872082 then return end
@@ -6,18 +6,20 @@ xpcall(function()
     shared.StaffDetectorLoading = true
     repeat task.wait() until game:IsLoaded()
 
-    local players = game:GetService("Players")
-    local http = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local HttpService = game:GetService("HttpService")
     local TeleportService = game:GetService("TeleportService")
-    local lp = players.LocalPlayer
-    local groupId = game.CreatorId
+    local LocalPlayer = Players.LocalPlayer
+    local GroupId = game.CreatorId
 
     if game.CreatorType ~= Enum.CreatorType.Group then return end
 
+    -- Sound alert (optional)
     local notify_sound
     task.spawn(function()
         if not isfile("AntiLua/staffdetect.mp3") then
-            writefile("AntiLua/staffdetect.mp3",
+            writefile(
+                "AntiLua/staffdetect.mp3",
                 tostring(game:HttpGetAsync(
                     "https://github.com/Ukrubojvo/api/raw/main/ap-disconnect-boeing.mp3"
                 ))
@@ -29,13 +31,15 @@ xpcall(function()
         notify_sound.Looped = false
     end)
 
+    -- Utils
     local function fetchURL(url)
         local ok, res = pcall(game.HttpGet, game, url)
-        if ok then
-            return http:JSONDecode(res)
+        if ok and res then
+            return HttpService:JSONDecode(res)
         end
     end
 
+    -- Get staff role ids
     local function extractStaffRoleIds(groupId)
         local data = fetchURL(
             ("https://groups.roblox.com/v1/groups/%d/roles"):format(groupId)
@@ -53,6 +57,7 @@ xpcall(function()
         return roleIds
     end
 
+    -- Get users in a role
     local function fetchUsersInRole(groupId, roleId)
         local cursor = ""
         local collected = {}
@@ -62,39 +67,45 @@ xpcall(function()
                 groupId, roleId, cursor
             )
             local ok, res = pcall(game.HttpGet, game, url)
-            if not ok then break end
-            local json = http:JSONDecode(res)
+            if not ok or not res then break end
+            local json = HttpService:JSONDecode(res)
             for _, u in ipairs(json.data or {}) do
-                collected[u.userId] = true
+                if u.userId then
+                    collected[u.userId] = true
+                end
             end
-            if not json.nextPageCursor then break end
+            if not json.nextPageCursor or json.nextPageCursor == "" then break end
             cursor = json.nextPageCursor
         end
         return collected
     end
 
-    local staffRoleIds = extractStaffRoleIds(groupId)
+    -- Build staff userId list
+    local staffRoleIds = extractStaffRoleIds(GroupId)
     local staffUserIds = {}
 
     for _, rid in ipairs(staffRoleIds) do
-        for uid in pairs(fetchUsersInRole(groupId, rid)) do
+        local users = fetchUsersInRole(GroupId, rid)
+        for uid in pairs(users) do
             staffUserIds[uid] = true
         end
     end
 
+    -- Check if player is staff by role name
     local function isStaff(plr)
-        local role = plr:GetRoleInGroup(groupId)
+        local role = plr:GetRoleInGroup(GroupId)
         if role then
-            local r = role:lower()
+            local r = string.lower(role)
             return r:find("mod") or r:find("staff") or r:find("admin")
                 or r:find("contributor") or r:find("script") or r:find("build")
         end
         return false
     end
 
+    -- Check if player has staff friends
     local function friendIsStaff(plr)
-        local ok, pages = pcall(players.GetFriendsAsync, players, plr.UserId)
-        if not ok then return false end
+        local ok, pages = pcall(Players.GetFriendsAsync, Players, plr.UserId)
+        if not ok or not pages then return false end
         while true do
             for _, f in ipairs(pages:GetCurrentPage()) do
                 if staffUserIds[f.Id] then
@@ -107,22 +118,25 @@ xpcall(function()
         return false
     end
 
+    -- AUTO LEAVE (KEEP THIS TELEPORT)
     local function AUTO_LEAVE()
-        if notify_sound then notify_sound:Play() end
+        if notify_sound then
+            notify_sound:Play()
+        end
         task.wait(0.3)
         TeleportService:Teleport(17625359962)
     end
 
-    -- CHECK CURRENT SERVER
-    for _, plr in ipairs(players:GetPlayers()) do
+    -- Check existing players
+    for _, plr in ipairs(Players:GetPlayers()) do
         if isStaff(plr) or friendIsStaff(plr) then
             AUTO_LEAVE()
             return
         end
     end
 
-    -- CHECK WHEN NEW PLAYER JOINS
-    players.PlayerAdded:Connect(function(plr)
+    -- Check new players joining
+    Players.PlayerAdded:Connect(function(plr)
         plr.CharacterAdded:Wait()
         if isStaff(plr) or friendIsStaff(plr) then
             AUTO_LEAVE()
